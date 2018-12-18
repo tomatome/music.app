@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"syscall"
@@ -15,10 +16,20 @@ var (
 	freq   = 44100
 )
 
+type ACTIVE_STATUS int
+
+const (
+	ACTIVE_STOPPED = iota
+	ACTIVE_PLAYING
+	ACTIVE_STALLED
+	ACTIVE_PAUSED
+)
+
 type Music struct {
 	curHandle uintptr
 	isPlay    bool
-	file      string
+	curUrl    string
+	err       error
 }
 
 func initBass() error {
@@ -26,37 +37,41 @@ func initBass() error {
 	ret, _, _ := bInit.Call(uintptr(device), uintptr(freq), 0, 0, 0)
 
 	if int(ret) != 0 {
-		fmt.Println("init: ok...")
+		fmt.Println("initBass: ok...")
 	} else {
-		fmt.Println("init: fail...")
+		fmt.Println("initBass: fail...")
 	}
 
 	return nil
 }
 
-func checkError() {
+func (m *Music) checkError() {
 	code, _, _ := BError.Call()
 	ret := int(code)
 	switch ret {
 	case 0:
-		fmt.Println("ok")
 	case 2:
+		m.err = errors.New("文件链接已失效")
 		MsgBox("文件链接已失效")
 	default:
 		fmt.Println("checkError ret:", ret)
 	}
 }
 
-func (m *Music) play(file string) error {
-	if m.curHandle != uintptr(0) {
+func (m *Music) play(url string) error {
+	if m.isActive() == ACTIVE_PLAYING {
 		m.stop()
 	}
-	var stream *syscall.LazyProc
-	var source uintptr
-	var err error
-	if strings.HasPrefix(file, "http") {
+
+	var (
+		stream *syscall.LazyProc
+		handle uintptr
+		err    error
+	)
+
+	if strings.HasPrefix(url, "http") {
 		stream = bass.NewProc("BASS_StreamCreateURL")
-		source, _, err = stream.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(file))),
+		handle, _, err = stream.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(url))),
 			0,
 			0x80000000,
 			0,
@@ -65,11 +80,11 @@ func (m *Music) play(file string) error {
 			fmt.Println("streamURL:", err)
 			//return err
 		}
-		checkError()
+		m.checkError()
 	} else {
 		stream = bass.NewProc("BASS_StreamCreateFile")
-		source, _, err = stream.Call(0,
-			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(file))),
+		handle, _, err = stream.Call(0,
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(url))),
 			0,
 			0,
 			0x80000000)
@@ -80,17 +95,18 @@ func (m *Music) play(file string) error {
 	}
 
 	play := bass.NewProc("BASS_ChannelPlay")
-	_, _, err = play.Call(source, uintptr(1))
+	_, _, err = play.Call(handle, uintptr(1))
 	if err != nil {
 		fmt.Println("Play:", err)
 		//return err
 	}
-	checkError()
-	m.curHandle = source
-	m.file = file
+	m.checkError()
+
+	m.curHandle = handle
+	m.curUrl = url
 	m.isPlay = true
 
-	return nil
+	return m.err
 }
 
 func (m *Music) stop() {
@@ -98,16 +114,19 @@ func (m *Music) stop() {
 	_, _, err := stop.Call(m.curHandle)
 	if err != nil {
 		fmt.Println("Stop:", err)
-		//return
 	}
-	checkError()
-	m.isPlay = false
 }
 
-func test() {
-	//music_path := "https://m10.music.126.net/20181011142710/ab9b6aa96b069332b2af878cb5cb9b62/ymusic/07fa/a2a1/35ea/732937117d6d0a8c13a81bb40184662e.mp3"
-	//music_path := "mu.mp3"
-	//music_path := "http://www.170mv.com/kw/other.web.nn01.sycdn.kuwo.cn/resource/n3/44/77/2277939288.mp3"
-	//initBass()
-	//play(music_path)
+func (m *Music) isActive() ACTIVE_STATUS {
+	if m.curHandle == uintptr(0) {
+		return ACTIVE_STOPPED
+	}
+	isActive := bass.NewProc("BASS_ChannelIsActive")
+	ret, _, err := isActive.Call(m.curHandle)
+	if err != nil {
+		fmt.Println("isActive:", err)
+	}
+	status := ACTIVE_STATUS(ret)
+	fmt.Println("status:", status)
+	return status
 }

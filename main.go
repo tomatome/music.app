@@ -14,6 +14,10 @@ import (
 	. "github.com/lxn/walk/declarative"
 )
 
+const (
+	Title = "音乐播放器"
+)
+
 type Detail struct {
 	Id   int
 	Url  string
@@ -26,12 +30,18 @@ type SongInfo struct {
 
 var mw *MyMainWindow
 
+func init() {
+	mw = &MyMainWindow{
+		pbchan: make(chan int, 1),
+	}
+
+	mw.music = new(Music)
+	mw.model = NewFooModel()
+}
+
 func main() {
 	initBass()
-	mw = &MyMainWindow{pbchan: make(chan int, 1)}
-	mw.music = new(Music)
-	var openAction, showAboutBoxAction *walk.Action
-	var recentMenu *walk.Menu
+
 	var sbi *walk.StatusBarItem
 	//boldFont, _ := walk.NewFont("Segoe UI", 9, walk.FontBold)
 	barBitmap, err := walk.NewBitmap(walk.Size{100, 1})
@@ -39,177 +49,18 @@ func main() {
 		panic(err)
 	}
 	defer barBitmap.Dispose()
-	mw.model = NewFooModel()
+
 	MW := MainWindow{
-		AssignTo: &mw.MainWindow,
-		Title:    "音乐播放器",
-		Icon:     "music.ico",
-		MinSize:  Size{800, 600},
-		MenuItems: []MenuItem{
-			Menu{
-				Text: "&文件",
-				Items: []MenuItem{
-					Action{
-						AssignTo:    &openAction,
-						Text:        "&打开",
-						Enabled:     Bind("enabledCB.Checked"),
-						Visible:     Bind("!openHiddenCB.Checked"),
-						Shortcut:    Shortcut{walk.ModControl, walk.KeyO},
-						OnTriggered: mw.openfiles,
-					},
-					Menu{
-						AssignTo: &recentMenu,
-						Text:     "Recent",
-					},
-					Separator{},
-					Action{
-						Text:        "E&xit",
-						OnTriggered: func() { mw.Close() },
-					},
-				},
-			},
-			Menu{
-				Text: "&Help",
-				Items: []MenuItem{
-					Action{
-						AssignTo: &showAboutBoxAction,
-						Text:     "预览",
-						OnTriggered: func() {
-
-						},
-					},
-				},
-			},
-		},
-		Layout: VBox{},
-
+		AssignTo:  &mw.MainWindow,
+		Title:     Title,
+		Icon:      "music.ico",
+		MinSize:   Size{800, 600},
+		MenuItems: initMenuItem(),
+		Layout:    VBox{},
 		Children: []Widget{
-			GroupBox{
-				Layout: HBox{},
-				Children: []Widget{
-					LineEdit{
-						AssignTo: &mw.searchBox,
-					},
-					PushButton{
-						Text:      "搜索",
-						OnClicked: mw.clicked,
-					},
-				},
-			},
-			TableView{
-				AssignTo: &mw.tv,
-				//AlternatingRowBGColor: walk.RGB(239, 239, 239),
-				CheckBoxes:       true,
-				ColumnsOrderable: true,
-				MultiSelection:   true,
-				Columns: []TableViewColumn{
-					{Title: "序号"},
-					{Title: "歌名", Width: 100, Alignment: AlignCenter},
-					{Title: "作者", Alignment: AlignCenter},
-					{Title: "链接", Alignment: AlignCenter, Width: 400},
-				},
-				StyleCell: func(style *walk.CellStyle) {
-					item := mw.model.items[style.Row()]
-
-					if item.Checked {
-						if style.Row()%2 == 0 {
-							style.BackgroundColor = walk.RGB(159, 215, 255)
-						} else {
-							style.BackgroundColor = walk.RGB(143, 199, 239)
-						}
-					}
-
-					switch style.Col() {
-					case 1:
-						/*if canvas := style.Canvas(); canvas != nil {
-							bounds := style.Bounds()
-							bounds.X += 2
-							bounds.Y += 2
-							bounds.Width = int((float64(bounds.Width) - 4) / 5 * float64(len(item.Name)))
-							bounds.Height -= 4
-							canvas.DrawBitmapPartWithOpacity(barBitmap, bounds, walk.Rectangle{0, 0, 100 / 5 * len(item.Name), 1}, 127)
-
-							bounds.X += 4
-							bounds.Y += 2
-							canvas.DrawText(item.Name, mw.tv.Font(), 0, bounds, walk.TextLeft)
-						}*/
-
-					case 2:
-						/*if item.Baz >= 900.0 {
-							style.TextColor = walk.RGB(0, 191, 0)
-							//style.Image = goodIcon
-						} else if item.Baz < 100.0 {
-							style.TextColor = walk.RGB(255, 0, 0)
-							//style.Image = badIcon
-						}*/
-
-					case 3:
-						/*if item.Quux.After(time.Now().Add(-365 * 24 * time.Hour)) {
-							style.Font = boldFont
-						}*/
-					}
-				},
-				Model: mw.model,
-				OnItemActivated: func() {
-					i := mw.tv.CurrentIndex()
-					if i < 0 {
-						return
-					}
-					fmt.Printf("OnItemActivated: %v\n", i)
-					Url := mw.model.items[i].Url
-					mw.music.play(Url)
-					mw.lname.SetText(mw.model.items[i].Name + " --- " + mw.model.items[i].Artist)
-					mw.pbchan <- mw.model.items[i].Duration / 1000
-					mw.model.items[i].Checked = true
-				},
-			},
-			GroupBox{
-				Layout: HBox{},
-				Children: []Widget{
-					PushButton{
-						AssignTo: &mw.ctrlPanel,
-						//Background: SolidColorBrush{Color: walk.RGB(255, 255, 255)},
-						Image:          "image/play.png",
-						ImageAboveText: true,
-						//MaxSize: Size{72, 72},
-						//MinSize: Size{72, 72},
-						Text: "  ",
-						//StretchFactor:  2,
-						OnClicked: mw.musicClicked,
-					},
-					GroupBox{
-						Layout:        VBox{},
-						StretchFactor: 2,
-						Children: []Widget{
-							GroupBox{
-								Layout: HBox{},
-								Children: []Widget{
-									Label{
-										AssignTo: &mw.lname,
-										Text:     "未知",
-									},
-									Label{
-										AssignTo:           &mw.ltime,
-										Text:               "00:00",
-										RightToLeftReading: true,
-									},
-								},
-							},
-							ProgressBar{
-								AssignTo: &mw.pb,
-								Value:    0,
-							},
-						},
-					},
-					PushButton{
-						Background:     SolidColorBrush{Color: walk.RGB(255, 255, 255)},
-						Image:          "music.ico",
-						ImageAboveText: true,
-						OnClicked:      mw.showList,
-						StretchFactor:  1,
-					},
-				},
-			},
+			initSearchBox(),
+			initTableView(),
+			initControl(),
 		},
 		StatusBarItems: []StatusBarItem{
 			StatusBarItem{
@@ -229,16 +80,19 @@ func main() {
 
 type MyMainWindow struct {
 	*walk.MainWindow
-	menu      *walk.Menu
-	tv        *walk.TableView
-	model     *FooModel
-	searchBox *walk.LineEdit
-	music     *Music
-	ctrlPanel *walk.PushButton
-	lname     *walk.Label
-	ltime     *walk.Label
-	pb        *walk.ProgressBar
-	pbchan    chan int
+	menu       *walk.Menu
+	tv         *walk.TableView
+	model      *FooModel
+	comBox     *walk.ComboBox
+	searchBox  *walk.LineEdit
+	music      *Music
+	ctrlPanel  *walk.PushButton
+	pModel     *walk.PushButton
+	lname      *walk.Label
+	ltime      *walk.Label
+	pb         *walk.ProgressBar
+	pbchan     chan int
+	musicModel int
 }
 type MSearch struct {
 	Result Song
@@ -256,42 +110,93 @@ type Artist struct {
 	Name string
 }
 
+func (mw *MyMainWindow) setTitle(s string) {
+	mw.SetTitle(Title + " ● " + s)
+}
+func (mw *MyMainWindow) setPlayModel() {
+	if !mw.music.isPlay {
+		return
+	}
+	if mw.pModel.Text() == "单曲" {
+		mw.pModel.SetText("循环")
+		mw.musicModel = 1
+	} else {
+		mw.pModel.SetText("单曲")
+		mw.musicModel = 0
+	}
+
+	/*if mw.musicModel == 1 {
+		for i := mw.tv.CurrentIndex(); i < len(mw.model.items); {
+			i++
+			if i > len(mw.model.items) {
+				i = 0
+			}
+			Url := mw.model.items[i].Url
+			mw.play(i, Url)
+			mw.tv.SetCurrentIndex(i)
+			mw.model.items[i].Checked = true
+			num := 400
+			for {
+				if mw.music.isActive() != ACTIVE_PLAYING {
+					break
+				}
+				if num == 0 {
+					break
+				}
+				num--
+				time.Sleep(1 * time.Second)
+			}
+		}
+	}*/
+
+	//if mw.music.isActive() == ACTIVE_PAUSED
+}
+
+func (mw *MyMainWindow) play(i int, url string) {
+	mw.music.curUrl = url
+	mw.lname.SetText(mw.model.items[i].Name + " --- " + mw.model.items[i].Artist)
+	mw.model.items[i].Checked = true
+	mw.pb.SetRange(0, mw.model.items[i].Duration)
+	mw.MusicStart()
+}
+
 func (mw *MyMainWindow) musicClicked() {
-	fmt.Println(mw.music.isPlay)
-	if mw.music.file == "" {
+	fmt.Println("musicClicked:", mw.music.isPlay)
+	if mw.music.curUrl == "" {
 		return
 	}
 	if mw.music.isPlay {
-		mw.music.stop()
-		pause, _ := walk.NewImageFromFile("image/pause.png")
-		mw.ctrlPanel.SetImage(pause)
-		mw.pbchan <- -1
+		mw.MusicStop()
 	} else {
-		mw.music.play(mw.music.file)
-		play, _ := walk.NewImageFromFile("image/play.png")
-		mw.ctrlPanel.SetImage(play)
-		mw.pbchan <- 0
+		mw.MusicStart()
 	}
 }
 func (mw *MyMainWindow) clicked() {
 	req := mw.searchBox.Text()
-	resp, _ := madoka.Search(req, "1", 1, 100)
+	if strings.TrimSpace(req) == "" {
+		mw.model.ResetRows()
+		return
+	}
+
+	t := getSearchTypeByName(mw.comBox.Text())
+	resp, _ := madoka.Search(req, t, 1, 20)
 	fmt.Println(resp)
 	var ms MSearch
 	json.Unmarshal([]byte(resp), &ms)
 	fmt.Println("all:", len(ms.Result.Songs))
-	mw.model.ResetRows()
+	mw.model.items = mw.model.items[0:0]
+
 	ids := make([]string, 0, len(ms.Result.Songs))
 	allMap := make(map[int]SongList)
 	for _, s := range ms.Result.Songs {
 		ids = append(ids, strconv.Itoa(s.Id))
 		allMap[s.Id] = s
 	}
-	fmt.Println(strings.Join(ids, ","))
+
 	a, _ := madoka.Download("["+strings.Join(ids, ",")+"]", "320000")
 	var m SongInfo
 	json.Unmarshal([]byte(a), &m)
-	fmt.Println(a)
+	//fmt.Println(a)
 	for i, data := range m.Data {
 		if data.Code != 200 {
 			continue
@@ -308,7 +213,7 @@ func (mw *MyMainWindow) clicked() {
 		mw.model.items = append(mw.model.items, f)
 	}
 
-	mw.model.PublishRowsReset()
+	mw.model.Publish()
 }
 func (mw *MyMainWindow) openfiles() {
 	dlg := new(walk.FileDialog)
@@ -343,39 +248,55 @@ func search(text, word string) (result []int) {
 }
 
 func MsgBox(message string) {
-	walk.MsgBox(mw, "音乐播放器", message, walk.MsgBoxIconWarning)
+	walk.MsgBox(mw, Title, message, walk.MsgBoxIconWarning)
 }
 
+const (
+	MUSIC_STOP = iota
+	MUSIC_START
+	MUSIC_RESTART
+)
+
+func (mw *MyMainWindow) MusicStart() {
+	mw.music.play(mw.music.curUrl)
+	play, _ := walk.NewImageFromFile("image/play.png")
+	mw.ctrlPanel.SetImage(play)
+	mw.pbchan <- mw.pb.MaxValue()
+}
+
+func (mw *MyMainWindow) MusicStop() {
+	mw.music.stop()
+	pause, _ := walk.NewImageFromFile("image/pause.png")
+	mw.ctrlPanel.SetImage(pause)
+	mw.pbchan <- MUSIC_STOP
+}
+func (mw *MyMainWindow) MusicRestart() {
+	mw.MusicStop()
+	mw.MusicStart()
+}
 func (mw *MyMainWindow) startProgressBar() {
 	num := -1
 	for {
 		select {
 
 		case start := <-mw.pbchan:
-			fmt.Println(start)
-			if start == -1 {
+			if start == MUSIC_STOP {
+				mw.pb.SetValue(0)
+				mw.ltime.SetText("0 / " + strconv.Itoa(mw.pb.MaxValue()))
 				num = -1
-				mw.pb.SetValue(0)
-				mw.ltime.SetText("00:00:00/00:00:" + strconv.Itoa(mw.pb.MaxValue()))
-			} else if start == 0 {
-				mw.pb.SetValue(0)
-				num = 0
 			} else {
 				mw.pb.SetValue(0)
-				mw.pb.SetRange(0, start)
 				num = 0
 			}
+			//fmt.Println(start)
 		case <-time.After(1 * time.Second):
-			//fmt.Println("超时了")
-			//default:
-			//fmt.Println("default")
 		}
 
 		if num != -1 {
 			if num < mw.pb.MaxValue() {
 				num++
 				mw.pb.SetValue(num)
-				mw.ltime.SetText("00:00:" + strconv.Itoa(num) + "/00:00:" + strconv.Itoa(mw.pb.MaxValue()))
+				mw.ltime.SetText(strconv.Itoa(num) + " / " + strconv.Itoa(mw.pb.MaxValue()))
 			}
 		}
 	}

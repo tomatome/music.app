@@ -2,7 +2,12 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"music/madoka"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/lxn/walk"
 )
@@ -27,6 +32,7 @@ type FooModel struct {
 
 func NewFooModel() *FooModel {
 	m := new(FooModel)
+	m.items = make([]*Foo, 0, 100)
 	m.ResetRows()
 	return m
 }
@@ -113,25 +119,82 @@ type Playlists struct {
 	Id   int
 }
 
-func (m *FooModel) ResetRows() {
-	m.items = make([]*Foo, 0, 100)
-	/*a, _ := madoka.PlayList("全部", "hot", 0, 2)
-	//fmt.Println("a:", a)
-	var md mModel
-	json.Unmarshal([]byte(a), &md)
-	fmt.Println(md.Playlists[1].Name)
-	f := new(Foo)
-	f.Name = md.Playlists[1].Name
-	f.Id = strconv.Itoa(md.Playlists[1].Id)
-	//fmt.Println("f.Id:", f.Id)
-	m.items = append(m.items, f)*/
-
-	for i := range m.items {
-		m.items[i].Index = i
+func (m *FooModel) getFmInfoByName(cat, id string) {
+	m.items = m.items[0:0]
+	a, _ := madoka.FmHotList(cat, id, 1, 30)
+	fmt.Println(a)
+	var f map[string]interface{}
+	json.Unmarshal([]byte(a), &f)
+	list := f["djRadios"].([]interface{})
+	allMap := make(map[int]map[string]interface{})
+	ids := make([]string, 0, len(list))
+	for _, lv := range list {
+		v := lv.(map[string]interface{})
+		id := int(v["id"].(float64))
+		ids = append(ids, strconv.Itoa(id))
+		allMap[id] = v
 	}
+	a1, _ := madoka.Download("["+strings.Join(ids, ",")+"]", "320000")
+	var ms SongInfo
+	json.Unmarshal([]byte(a1), &ms)
+	for i, data := range ms.Data {
+		if data.Code != 200 {
+			continue
+		}
+		v := allMap[data.Id]
+		f := new(Foo)
+		f.Name = v["name"].(string)
+		f.Id = strconv.Itoa(int(v["id"].(float64)))
+		f.Url = data.Url
+		//f.Artist = v["artists"].([]interface{})[0].(map[string]interface{})["name"].(string)
+		//f.Duration = int(v["duration"].(float64)) / 1000
+		f.Index = i
+		m.items = append(m.items, f)
+	}
+}
 
-	// Notify TableView and other interested parties about the reset.
+func (m *FooModel) getPlayListById(id string) {
+	m.items = m.items[0:0]
+	a, _ := madoka.PlayListDetail(id)
+	var f map[string]interface{}
+	json.Unmarshal([]byte(a), &f)
+	list := f["result"].(map[string]interface{})["tracks"].([]interface{})
+	//fmt.Println("list:", list)
+	allMap := make(map[int]map[string]interface{})
+	ids := make([]string, 0, len(list))
+	for _, lv := range list {
+		v := lv.(map[string]interface{})
+		id := int(v["id"].(float64))
+		ids = append(ids, strconv.Itoa(id))
+		allMap[id] = v
+	}
+	a1, _ := madoka.Download("["+strings.Join(ids, ",")+"]", "320000")
+	var ms SongInfo
+	json.Unmarshal([]byte(a1), &ms)
+	for i, data := range ms.Data {
+		if data.Code != 200 {
+			continue
+		}
+
+		v := allMap[data.Id]
+		f := new(Foo)
+		f.Name = v["name"].(string)
+		f.Id = strconv.Itoa(int(v["id"].(float64)))
+		f.Url = data.Url
+		f.Artist = v["artists"].([]interface{})[0].(map[string]interface{})["name"].(string)
+		f.Duration = int(v["duration"].(float64) / 1000)
+		f.Index = i
+		m.items = append(m.items, f)
+	}
+	fmt.Println(len(m.items))
+}
+
+func (m *FooModel) ResetRows() {
+	m.getPlayListById("3778678")
+	m.Publish()
+}
+
+func (m *FooModel) Publish() {
 	m.PublishRowsReset()
-
-	m.Sort(m.sortColumn, m.sortOrder)
+	//m.Sort(m.sortColumn, m.sortOrder)
 }
